@@ -2,47 +2,54 @@
 第 7 课：服务级状态机定义与转移规则。
 对应需求文档 §5.4。
 """
+
 from __future__ import annotations
 
 from enum import Enum
-from typing import FrozenSet,Tuple
+from typing import FrozenSet, Tuple
 
-class ServiceStatus(str,Enum):
+
+class ServiceState(str, Enum):
     """ServiceManager 主状态。"""
 
     IDLE = "IDLE"
-    STARTING = "STREAMING"
+    STARTING = "STARTING"
     RUNNING = "RUNNING"
     STOPPING = "STOPPING"
     ERROR = "ERROR"
 
 
-# (当前状态, 目标状态) 是否允许
-_ALLOWED_TRANSITIONS:FrozenSet[Tuple[ServiceStatus,ServiceStatus]] = frozenset(
-   {
-    (ServiceStatus.IDLE,ServiceStatus.STARTING),
-    (ServiceStatus.STARTING,ServiceStatus.RUNNING),
-    (ServiceStatus.STARTING,ServiceStatus.ERROR),
-    (ServiceStatus.RUNNING,ServiceStatus.IDLE),
-    (ServiceStatus.RUNNING,ServiceStatus.STOPPING),
-    (ServiceStatus.STOPPING,ServiceStatus.ERROR),
-    (ServiceStatus.ERROR,ServiceStatus.IDLE),
-    (ServiceStatus.ERROR,ServiceStatus.STOPPING),
-   }
+_ALLOWED_TRANSITIONS: FrozenSet[Tuple[ServiceState, ServiceState]] = frozenset(
+    {
+        (ServiceState.IDLE, ServiceState.STARTING),
+        (ServiceState.STARTING, ServiceState.RUNNING),
+        (ServiceState.STARTING, ServiceState.ERROR),
+        (ServiceState.RUNNING, ServiceState.STOPPING),
+        (ServiceState.RUNNING, ServiceState.ERROR),
+        (ServiceState.STOPPING, ServiceState.IDLE),
+        (ServiceState.ERROR, ServiceState.STOPPING),
+        (ServiceState.ERROR, ServiceState.IDLE),
+    }
 )
-def can_transition(from_status: ServiceStatus, to_status: ServiceStatus) -> bool:
+
+
+def can_transition(from_state: ServiceState, to_state: ServiceState) -> bool:
     """是否允许从 from_state 转到 to_state。"""
-    if from_status ==to_status:
+    if from_state == to_state:
         return True
-    return (from_status,to_status) in _ALLOWED_TRANSITIONS
+    return (from_state, to_state) in _ALLOWED_TRANSITIONS
 
-def may_start(state: ServiceStatus) -> bool:
-    return state == ServiceStatus.IDLE
 
-def may_stop(state: ServiceStatus) -> bool:
-    return state in (ServiceStatus.RUNNING, ServiceStatus.ERROR)
+def may_start(state: ServiceState) -> bool:
+    """仅 IDLE 可 start（§5.4.3）。"""
+    return state == ServiceState.IDLE
 
-def may_reset(state: ServiceStatus) -> bool:
+
+def may_stop(state: ServiceState) -> bool:
+    """RUNNING / ERROR 可 stop。"""
+    return state in (ServiceState.RUNNING, ServiceState.ERROR)
+
+
+def may_reset(state: ServiceState) -> bool:
     """ERROR 可 reset 回 IDLE。"""
-    return state == ServiceStatus.ERROR
-
+    return state == ServiceState.ERROR

@@ -35,6 +35,7 @@ class AcquisitionConfig:
     buffer_size: int = 25  # 单批最多处理样本数
     loop_sleep_sec: float = 0.005
     stats_every_n_batches: int = 20
+    quiet: bool = False
 
 
 class AcquisitionWorker:
@@ -144,13 +145,14 @@ class AcquisitionWorker:
 
         cfg = self._acq_config
         fs = self._preprocess_config.sample_rate
-        print("-" * 50)
-        print("AcquisitionWorker 运行中... 调用 stop() 结束")
-        print(
-            f"拉数: fetch_new_batch | 单批上限: {cfg.buffer_size} | "
-            f"滤波: {'ON' if self._preprocess_config.filter_enabled else 'OFF'}"
-        )
-        print("-" * 50)
+        if not cfg.quiet:
+            print("-" * 50)
+            print("AcquisitionWorker 运行中... 调用 stop() 结束")
+            print(
+                f"拉数: fetch_new_batch | 单批上限: {cfg.buffer_size} | "
+                f"滤波: {'ON' if self._preprocess_config.filter_enabled else 'OFF'}"
+            )
+            print("-" * 50)
 
         while not self._stop_event.is_set():
             data = self._board.fetch_new_batch(cfg.buffer_size)
@@ -185,7 +187,11 @@ class AcquisitionWorker:
                     timestamps=lsl_ts,
                 )
 
-            if batch_count % cfg.stats_every_n_batches == 0:
+            if (
+                not cfg.quiet
+                and cfg.stats_every_n_batches > 0
+                and batch_count % cfg.stats_every_n_batches == 0
+            ):
                 print(f"[统计] 已累计推送约 {total} 个 EEG 样本")
 
             time.sleep(cfg.loop_sleep_sec)
