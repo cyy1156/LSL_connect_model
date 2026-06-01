@@ -19,6 +19,9 @@ HELP_TEXT = """
   config filter on|off  开关滤波（仅 RUNNING）
   gui hint          OpenBCI GUI / LSL 连接提示
   quit / exit       退出（会先 stop）
+  model list        已登记模型
+  model start <name>启动模型（需RUNNING）
+  model stop <name> 停止指定模型
 """.strip()
 
 GUI_HINT_TEXT = """
@@ -42,7 +45,7 @@ class ControlPanel:
 
     def run(self)->None:
         print("=" * 50)
-        print("OpenBCI EEG 控制面板 — 第 8 课")
+        print("OpenBCI EEG 控制面板 — 第 10 课")
         print("输入 help 查看命令")
         print("=" * 50)
 
@@ -73,6 +76,7 @@ class ControlPanel:
             "config": self._cmd_config,
             "gui": self._cmd_gui,
             "quit": self._cmd_quit,
+            "model": self._cmd_model,
             "exit": self._cmd_quit,
         }
 
@@ -156,4 +160,40 @@ class ControlPanel:
         self._alive=False
         print("再见。")
 
-    
+    def _cmd_model(self, args: list[str]) -> None:
+        if not args:
+            print("用法: model list | model start <name> | model stop <name>")
+            return
+
+        sub = args[0].lower()
+
+        if sub == "list":
+            names = self._mgr.list_models()
+            if not names:
+                print("（无已登记模型）")
+                return
+            running = set(self._mgr.get_running_models())
+            print("已登记模型:")
+            for n in names:
+                mark = " *" if n in running else ""
+                print(f"  {n}{mark}")
+            print("  (* 表示运行中)")
+            return
+
+        if sub == "start":
+            if len(args) < 2:
+                print("用法: model start <name>")
+                return
+            ok, msg = self._mgr.start_model(args[1])
+            print(f"{'[OK]' if ok else '[失败]'} {msg}")
+            return
+
+        if sub == "stop":
+            if len(args) < 2:
+                print("用法: model stop <name>")
+                return
+            ok, msg = self._mgr.stop_model(args[1])
+            print(f"{'[OK]' if ok else '[失败]'} {msg}")
+            return
+
+        print("未知 model 子命令，支持: list / start / stop")

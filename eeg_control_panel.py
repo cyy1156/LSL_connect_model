@@ -12,9 +12,10 @@ from lsl_connect.cli import ControlPanel
 from lsl_connect.lsl_streams import LslStreamConfig
 from lsl_connect.preprocessing import PreprocessConfig
 from lsl_connect.service_manager import ServiceManager,ServiceManagerConfig
+from lsl_connect.config_loader import  build_service_manager_config
 
 def build_manager() ->ServiceManager:
-      #合成板
+     """ #合成板
       board = BoardConfig(use_synthetic=True,cyton_eeg_count=8)
       #真机
       # board = BoardConfig(serial_port="COM10", use_synthetic=False, cyton_eeg_count=8)
@@ -31,7 +32,10 @@ def build_manager() ->ServiceManager:
               stats_every_n_batches=0,
           ),
       )
-      return ServiceManager(config)
+      """
+     config,msg=build_service_manager_config()
+     print(f"[配置]{msg}")
+     return ServiceManager(config)
 def main()->None:
     manager = build_manager()
     panel = ControlPanel(manager)

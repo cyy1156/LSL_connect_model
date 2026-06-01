@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 from lsl_connect.acquisition_work import AcquisitionConfig, AcquisitionWorker
 from lsl_connect.board import BoardConfig
 from lsl_connect.lsl_streams import LslStreamConfig
+from lsl_connect.model_worker import ModelWorker
 from lsl_connect.preprocessing import PreprocessConfig
 from lsl_connect.state import (
     ServiceState,
@@ -20,6 +21,7 @@ from lsl_connect.state import (
     may_start,
     may_stop,
 )
+from models import MODEL_REGISTRY
 
 
 @dataclass
@@ -62,6 +64,7 @@ class ServiceManager:
         self._state = ServiceState.IDLE
         self._worker: Optional[AcquisitionWorker] = None
         self._last_error: Optional[str] = None
+        self._model_workers: dict[str, ModelWorker] = {}
 
     def get_state(self) -> ServiceState:
         with self._lock:
@@ -122,6 +125,7 @@ class ServiceManager:
                 return False
 
         self._set_state(ServiceState.STOPPING)
+        self.stop_all_models()
 
         worker = None
         with self._lock:
@@ -180,15 +184,21 @@ class ServiceManager:
         ]
         if s["last_error"]:
             lines.append(f"[错误] {s['last_error']}")
+        running = self.get_running_models()
+        if running:
+            lines.append(f"[模型] 运行中: {', '.join(running)}")
+        else:
+            lines.append("[模型] 无")
         return "\n".join(lines)
+
     def set_serial_port(self, port: str) -> tuple[bool, str]:
         """仅 IDLE 可改串口；改后走真机模式。"""
         with self._lock:
             if self._state != ServiceState.IDLE:
-                return False,"仅 IDLE可 config port ,请先stop"
-            self._config.serial_port = port.strip()
-            self._config.cyton_eeg_enabled = False
-            return True,f"串口已设为 {port}（下次 start 生效）"
+                return False, "仅 IDLE 可 config port，请先 stop"
+            self._config.board_config.serial_port = port.strip()
+            self._config.board_config.use_synthetic = False
+        return True, f"串口已设为 {port}（下次 start 生效）"
 
     def set_filter_enabled(self, enabled: bool) -> tuple[bool, str]:
         """RUNNING 时改预处理开关，下一批生效。"""
@@ -196,10 +206,59 @@ class ServiceManager:
             if self._state != ServiceState.RUNNING:
                 return False, "仅 RUNNING 可 config filter"
             self._config.preprocess.filter_enabled = enabled
-            label ="ON" if enabled else "OFF"
-            return True,f"滤波已设为 {label}（下一批生效）"
+        label = "ON" if enabled else "OFF"
+        return True, f"滤波已设为 {label}（下一批生效）"
 
     def shutdown(self) -> None:
-        """quit 时：若在采集中则先 stop。"""
-        if may_stop(self._state()):
+        """quit 时：先停模型，再停采集。"""
+        self.stop_all_models()
+        if may_stop(self.get_state()):
             self.stop_acquisition()
+
+    def list_models(self) -> list[str]:
+        """已登记模型名（第 10 课来自 MODEL_REGISTRY）。"""
+        return sorted(MODEL_REGISTRY.keys())
+
+    def start_model(self, name: str) -> tuple[bool, str]:
+        """
+        启动模型 worker。仅 RUNNING 且 LSL 流已存在时允许。
+        返回 (成功与否, 说明)。
+        """
+        name = name.strip()
+        if self.get_state() != ServiceState.RUNNING:
+            return False, "请先 start 采集，等 status 为 RUNNING 后再 model start"
+
+        if name in self._model_workers:
+            return False, f"模型 {name} 已在运行"
+
+        cls = MODEL_REGISTRY.get(name)
+        if cls is None:
+            return False, f"未登记模型: {name}，可用 model list 查看"
+
+        try:
+            plugin = cls()
+            worker = ModelWorker(plugin)
+            worker.start()
+            self._model_workers[name] = worker
+            return True, f"模型 {name} 已启动"
+        except Exception as exc:
+            return False, str(exc)
+
+    def stop_model(self, name: str) -> tuple[bool, str]:
+        name = name.strip()
+        worker = self._model_workers.pop(name, None)
+        if worker is None:
+            return False, f"模型 {name} 未在运行"
+        try:
+            worker.stop()
+        except Exception as exc:
+            return False, str(exc)
+        return True, f"模型 {name} 已停止"
+
+    def stop_all_models(self) -> None:
+        """停止所有 model worker（stop 采集 / quit 时调用）。"""
+        for name in list(self._model_workers.keys()):
+            self.stop_model(name)
+
+    def get_running_models(self) -> list[str]:
+        return sorted(self._model_workers.keys())
