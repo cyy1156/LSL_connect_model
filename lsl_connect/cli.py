@@ -17,23 +17,35 @@ HELP_TEXT = """
   reset             ERROR 恢复为 IDLE
   config port COMx  设置串口（仅 IDLE）
   config filter on|off  开关滤波（仅 RUNNING）
+  config labels CH1,CH2,...  设置 EEG 通道名（仅 IDLE，与 CSV 表头一致）
   gui hint          OpenBCI GUI / LSL 连接提示
   quit / exit       退出（会先 stop）
   model list        已登记模型
   model start <name>启动模型（需RUNNING）
   model stop <name> 停止指定模型
+  record start [path]  开始 CSV 录制（需 RUNNING，可选文件路径）
+  record stop            停止录制
+  record status          录制状态
 """.strip()
 
 GUI_HINT_TEXT = """
-[GUI / LSL 提示]
-1. 先在本面板输入 start，等到 status 显示 RUNNING
-2. 本脚本已占用串口，OpenBCI GUI 不要再选 Serial/Cyton 直连
-3. 订阅本机 LSL 流（任选其一）:
-   - OpenBCI GUI: Networking → LSL → 选择 OpenBCI_EEG
-   - LabRecorder: 添加 OpenBCI_EEG / OpenBCI_Accel
-4. 流名: OpenBCI_EEG (8ch, 250Hz, µV)
-   加速度: OpenBCI_Accel
-5. 若 GUI 无 LSL 入口，可用 LabRecorder 录 .xdf 或用自写 Inlet 脚本查看
+[OpenBCI GUI 7 — STREAMING 验证（推荐 T3/T5）]
+1. config/default.yaml 设 gui推流.启用: true
+2. 控制面板: start → status 为 RUNNING
+3. GUI 左侧选: STREAMING (from external)
+4. 右侧填写:
+     IP:   225.1.1.1
+     PORT: 6677
+     BOARD: Synthetic（合成板时）/ Cyton（真机时）
+5. START SESSION → 再点绿色 Start Data Stream
+6. T5: 保持 GUI + 控制面板 model start demo，跑 10 分钟
+
+说明:
+- 这是 BrainFlow UDP 推流，专供 GUI 7 的 STREAMING 模式
+- 模型仍走 LSL(OpenBCI_EEG)，两路并行、互不冲突
+- 不要用 CYTON (live) Serial，会抢 COM 口
+
+[备选: LabRecorder 录 LSL 流 OpenBCI_EEG]
 """.strip()
 
 class ControlPanel:
@@ -77,6 +89,7 @@ class ControlPanel:
             "gui": self._cmd_gui,
             "quit": self._cmd_quit,
             "model": self._cmd_model,
+            "record": self._cmd_record,
             "exit": self._cmd_quit,
         }
 
@@ -125,7 +138,7 @@ class ControlPanel:
 
     def _cmd_config(self,args: list[str]) -> None:
         if len(args) < 2:
-            print("用法: config port COM10  或  config filter on|off")
+            print("用法: config port COM10  |  config filter on|off  |  config labels 名1,名2,...")
             return
 
         sub =args[0].lower()
@@ -145,8 +158,12 @@ class ControlPanel:
                 print("用法：config filter on|off")
                 return
             print(f"{'[OK]' if ok else '[失败]'} {msg}")
+        elif sub == "labels":
+            text = " ".join(args[1:]) if len(args) > 1 else value
+            ok, msg = self._mgr.set_eeg_channel_labels(text)
+            print(f"{'[OK]' if ok else '[失败]'} {msg}")
         else:
-            print("未知 config 子命令，支持：port，filter")
+            print("未知 config 子命令，支持：port，filter，labels")
 
     def _cmd_gui(self,args: list[str]) -> None:
         if args and args[0].lower() !="hint":
@@ -168,15 +185,20 @@ class ControlPanel:
         sub = args[0].lower()
 
         if sub == "list":
-            names = self._mgr.list_models()
-            if not names:
-                print("（无已登记模型）")
+            specs = self._mgr.get_model_specs()
+            if not specs:
+                print("（无已登记模型，请检查 config/models.yaml）")
                 return
             running = set(self._mgr.get_running_models())
             print("已登记模型:")
-            for n in names:
+            for n in sorted(specs.keys()):
+                spec = specs[n]
                 mark = " *" if n in running else ""
-                print(f"  {n}{mark}")
+                desc = spec.description or "（无说明）"
+                print(
+                    f"  {n}{mark}  |  {desc}  "
+                    f"|  窗口={spec.window_size}  步长={spec.hop_size}"
+                )
             print("  (* 表示运行中)")
             return
 
@@ -197,3 +219,36 @@ class ControlPanel:
             return
 
         print("未知 model 子命令，支持: list / start / stop")
+
+    def _cmd_record(self, args: list[str]) -> None:
+        if not args:
+            print("用法: record start [path] | record stop | record status")
+            return
+
+        sub = args[0].lower()
+        if sub == "start":
+            path = args[1] if len(args) > 1 else None
+            ok, msg = self._mgr.start_recording(path)
+            print(f"{'[OK]' if ok else '[失败]'} {msg}")
+            return
+
+        if sub == "stop":
+            ok, msg, report = self._mgr.stop_recording()
+            print(f"{'[OK]' if ok else '[失败]'} {msg}")
+            if ok and report is not None:
+                print("--- 录制质量 ---")
+                print(report.summary_message())
+            return
+
+        if sub == "status":
+            rec = self._mgr.get_recording_status()
+            if rec.get("active"):
+                print(
+                    f"[录制] ON  path={rec.get('path')}  "
+                    f"samples={rec.get('samples_written', 0)}"
+                )
+            else:
+                print("[录制] OFF")
+            return
+
+        print("未知 record 子命令，支持: start / stop / status")

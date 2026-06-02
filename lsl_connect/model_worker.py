@@ -1,12 +1,13 @@
 """
 第 10 课：模型 worker — 订阅 LSL EEG 流，滑动窗口调用 ModelPlugin.predict。
+UI 模式：on_result 回调 + 短 pull 超时，便于快速 stop。
 """
 
 from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 from pylsl import StreamInlet, resolve_byprop
@@ -19,8 +20,9 @@ from models.base import ModelPlugin
 class ModelWorkerConfig:
     stream_name: str = EEG_STREAM_NAME
     resolve_timeout: float = 5.0
-    pull_timeout: float = 1.0
+    pull_timeout: float = 0.3
     print_every_n_predicts: int = 1
+    silent: bool = False
 
 
 class ModelWorker:
@@ -38,9 +40,13 @@ class ModelWorker:
         self,
         plugin: ModelPlugin,
         config: Optional[ModelWorkerConfig] = None,
+        on_result: Optional[Callable[[Any], None]] = None,
+        on_error: Optional[Callable[[str], None]] = None,
     ) -> None:
         self._plugin = plugin
         self._config = config or ModelWorkerConfig()
+        self._on_result = on_result
+        self._on_error = on_error
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -84,6 +90,12 @@ class ModelWorker:
 
     def stop(self, join_timeout: float = 5.0) -> None:
         self._stop_event.set()
+        inlet = self._inlet
+        if inlet is not None:
+            try:
+                inlet.close_stream()
+            except Exception:
+                pass
         if self._thread is not None:
             self._thread.join(timeout=join_timeout)
             self._thread = None
@@ -105,6 +117,8 @@ class ModelWorker:
                 timeout=cfg.pull_timeout,
                 max_samples=hop,
             )
+            if self._stop_event.is_set():
+                break
             if not chunk:
                 continue
 
@@ -120,6 +134,9 @@ class ModelWorker:
                 filled = 0
 
             for i in range(n_new):
+                if self._stop_event.is_set():
+                    break
+
                 if filled < window:
                     buf[:, filled] = samples_ct[:, i]
                     filled += 1
@@ -129,18 +146,33 @@ class ModelWorker:
 
                 if filled >= window:
                     data = buf.copy()
-                    result = plugin.predict(data)
+                    try:
+                        result = plugin.predict(data)
+                    except Exception as exc:
+                        msg = f"predict 异常: {exc}"
+                        if self._on_error:
+                            self._on_error(msg)
+                        elif not cfg.silent:
+                            print(f"[模型/{plugin.name}] {msg}")
+                        continue
+
                     self._predict_count += 1
                     if self._predict_count % cfg.print_every_n_predicts == 0:
-                        self._print_result(result)
+                        self._emit_result(result)
 
-    def _print_result(self, result: Any) -> None:
+    def _emit_result(self, result: Any) -> None:
+        if self._on_result is not None:
+            self._on_result(result)
+            return
+        if self._config.silent:
+            return
         if isinstance(result, dict):
             mean_uv = result.get("mean_uv")
             std_uv = result.get("std_uv")
-            print(
-                f"[模型/{self._plugin.name}] "
-                f"mean={mean_uv:.2f} uV  std={std_uv:.2f} uV"
-            )
-        else:
-            print(f"[模型/{self._plugin.name}] {result}")
+            if mean_uv is not None and std_uv is not None:
+                print(
+                    f"[模型/{self._plugin.name}] "
+                    f"mean={float(mean_uv):.2f} uV  std={float(std_uv):.2f} uV"
+                )
+                return
+        print(f"[模型/{self._plugin.name}] {result}")

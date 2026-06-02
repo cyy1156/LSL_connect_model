@@ -35,7 +35,9 @@ def build_manager() ->ServiceManager:
       """
      config,msg=build_service_manager_config()
      print(f"[配置]{msg}")
-     return ServiceManager(config)
+     mgr = ServiceManager(config)
+     print(f"[模型] {mgr.get_models_message()}")
+     return mgr
 def main()->None:
     manager = build_manager()
     panel = ControlPanel(manager)

@@ -119,12 +119,17 @@ class AcquisitionWorker:
         )
         self._thread.start()
 
-    def stop(self, join_timeout: float = 5.0) -> None:
+    def stop(self, join_timeout: float = 8.0) -> None:
         self._stop_event.set()
+
+        # 先停 BrainFlow 流，避免采集线程卡在 get_board_data 导致 COM 无法释放
+        if self._board is not None:
+            self._board.stop_stream_only()
+
         if self._thread is not None:
             self._thread.join(timeout=join_timeout)
             if self._thread.is_alive():
-                print("[警告] 采集线程未在超时内结束")
+                print("[警告] 采集线程未在超时内结束，仍将尝试释放板卡")
             self._thread = None
 
         if self._board is not None:
@@ -155,7 +160,8 @@ class AcquisitionWorker:
             print("-" * 50)
 
         while not self._stop_event.is_set():
-            data = self._board.fetch_new_batch(cfg.buffer_size)
+            # 用 get_current_board_data，避免 get_board_data 长时间阻塞导致 stop 时 COM 占着不放
+            data = self._board.fetch_batch(cfg.buffer_size)
             if data.shape[1] == 0:
                 time.sleep(cfg.loop_sleep_sec)
                 continue

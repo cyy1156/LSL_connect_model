@@ -16,3 +16,27 @@
 lsl:
   eeg流名称: OpenBCI_EEG
   加速度流名称: OpenBCI_Accel
+  # 顺序 = CH1…CH8；若实际接线不同，请按「第几列数据」改名称（方案 A）
+  eeg通道标签:
+    - Fp1
+    - Fp2
+    - C3
+    - C4
+    - P7
+    - P8
+    - O1
+    - O2
+
+# OpenBCI GUI 7 STREAMING 旁路（可选，见 docs/项目框架-数据缓存与LSL协议.md §5）
+gui推流:
+  启用: false
+  ip: 225.1.1.1
+  端口: 6677
+
+录制:
+  启用: false                    # true = 开始采集时自动开始 CSV 录制
+  保存目录: data/recordings
+  文件前缀: eeg
+  包含加速度: false
+  停止采集时自动停录: true
+  flush间隔秒: 2.0

@@ -9,13 +9,17 @@ from dataclasses import dataclass
 from typing import Optional,Tuple
 
 import numpy as np
-from brainflow.board_shim import BoardShim ,BrainFlowInputParams,BoardIds
+from brainflow.board_shim import BoardShim, BrainFlowInputParams, BoardIds, BrainFlowPresets
 @dataclass
 class BoardConfig:
-    serial_port: str="COM10"
-    use_synthetic: bool=True#是否使用合成版（就是虚拟版不需要接入硬件测试）
-    cyton_eeg_count: int =8
-    stream_buffer_size: int= 45000
+    serial_port: str = "COM10"
+    use_synthetic: bool = True  # 是否使用合成板（无硬件测试）
+    cyton_eeg_count: int = 8
+    stream_buffer_size: int = 45000
+    # OpenBCI GUI 7「STREAMING (from external)」旁路（BrainFlow UDP，与 LSL 并行）
+    gui_streaming_enabled: bool = False
+    gui_stream_ip: str = "225.1.1.1"
+    gui_stream_port: int = 6677
 
 class CytonBoard:
     """
@@ -56,13 +60,39 @@ class CytonBoard:
         if self._board is not None:
             raise RuntimeError("板卡已连接，请先 disconnect()")
 
+        # 清理上次未释放的 BrainFlow 会话，避免第二次 open COM 失败
+        try:
+            BoardShim.release_all_sessions()
+        except Exception:
+            pass
+
         params = BrainFlowInputParams()
         if not self.config.use_synthetic:
-            params.serial_port =self.config.serial_port
+            params.serial_port = self.config.serial_port
 
         self._board = BoardShim(self._board_id, params)
-        self._board.prepare_session()
-        self._board.start_stream(self.config.stream_buffer_size)
+        try:
+            self._board.prepare_session()
+            self._board.start_stream(self.config.stream_buffer_size)
+        except Exception:
+            self._board = None
+            try:
+                BoardShim.release_all_sessions()
+            except Exception:
+                pass
+            raise
+
+        if self.config.gui_streaming_enabled:
+            url = (
+                f"streaming_board://{self.config.gui_stream_ip}:"
+                f"{self.config.gui_stream_port}"
+            )
+            self._board.add_streamer(url, BrainFlowPresets.DEFAULT_PRESET)
+            print(f"[OK] GUI STREAMING 推流: {url}")
+            if self.config.use_synthetic:
+                print("[提示] GUI 里 BOARD 请选 Synthetic（合成板），不要选 Cyton")
+            else:
+                print("[提示] GUI 里 BOARD 请选 Cyton")
 
         if self.config.use_synthetic:
             print("[OK] 已启动 BrainFlow 合成板（无硬件测试模式）")
@@ -70,20 +100,36 @@ class CytonBoard:
             print(f"[OK] 已连接 OpenBCI Cyton，串口: {self.config.serial_port}")
         return self._board
 
-    def disconnect(self) -> None:
-        """停止推流并释放会话。"""
+    def stop_stream_only(self) -> None:
+        """仅停流，用于采集线程 join 前先打断 get_board_data 阻塞。"""
         if self._board is None:
             return
         try:
             self._board.stop_stream()
-        except:
-            pass
-        try:
-            self._board.release_session()
-        except Exception :
-            pass
+        except Exception as exc:
+            print(f"[警告] stop_stream: {exc}")
 
+    def disconnect(self) -> None:
+        """停止推流并释放会话。"""
+        if self._board is None:
+            return
+
+        board = self._board
         self._board = None
+
+        try:
+            board.stop_stream()
+        except Exception as exc:
+            print(f"[警告] stop_stream: {exc}")
+        try:
+            board.release_session()
+        except Exception as exc:
+            print(f"[警告] release_session: {exc}")
+        try:
+            BoardShim.release_all_sessions()
+        except Exception as exc:
+            print(f"[警告] release_all_sessions: {exc}")
+
         print("[OK] 已释放硬件资源")
 
     def get_board_shim(self) -> BoardShim:

@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# IDE
+.idea/
+
+# 本地 EEG 录制数据
+data/recordings/*.csv
+data/recordings/*.meta.json
