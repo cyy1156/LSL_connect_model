@@ -7,6 +7,9 @@ __pycache__/
 # IDE
 .idea/
 
-# 本地 EEG 录制数据
-data/recordings/*.csv
-data/recordings/*.meta.json
+# 本地 EEG 录制数据（仅保留占位文件）
+data/recordings/*
+!data/recordings/.gitkeep
+
+# 本地实际配置（模板 *.example.yaml 入库）
+config/*.local.yaml
