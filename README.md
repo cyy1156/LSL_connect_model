@@ -8,6 +8,8 @@
 
 无硬件时可用「合成板」模式先跑通全链路。
 
+![LSL_connect_model 架构 · 分层与数据流](docs/images/lsl_architecture.png)
+
 ## 核心能力
 
 | 能力 | 说明 |
